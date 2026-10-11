@@ -1,8 +1,19 @@
 # Marjan
 
-**From public obligation to payment — verifiably.**
+**The cap on piggyback purchases from government price records is written in the law. How much of it is already used is invisible to anyone outside the managing agency's system.**
 
-Marjan is an open Solana protocol for public procurement obligations. It enforces statutory caps on shared government contracts, starting with Brazil's adhesion limits (Law 14.133/2021, art. 86, and Decree 11.462/2023, arts. 31–33), and records each government payment obligation through explicit, evidence-backed states. Within the protocol, a cap cannot be exceeded and an obligation's balance cannot be financed twice, even under concurrent requests. Anyone can verify that state on-chain without trusting our interface.
+Brazilian law lets agencies that did not take part in a tender adhere ("carona", piggybacking) to another agency's price-registration record: up to 50% of each item per agency, and twice the registered quantity across all of them (Law 14.133/2021, art. 86, §§4–5). The second limit depends on what every other agency has already taken. That count lives only in the managing agency's own system. An adherent from another city, state or branch cannot check it before buying; audit courts find out afterwards.
+
+Marjan keeps that count as shared state on Solana. An item's adhesion balance changes only through a program that refuses, at request time, any request that breaks the statutory caps. The adherent, the supplier, the manager or an audit court can verify it on-chain without trusting our interface.
+
+**See it refuse** (Solana devnet, demo identities; full run in [`docs/DEVNET.md`](docs/DEVNET.md)):
+
+- Six agencies concurrently request 50 units each of an item whose total adhesion cap is 200. Four land; two are refused with `ExceedsGlobalCap` ([tx](https://explorer.solana.com/tx/4zqR31xLt2NBCa3jwRGKQr1YZAAZh8dTjcg4JyRD1Hj4NwtSdrfhR4pz9MNT7Sd5NFGMM8MpjyZmuLzy49L9oq21?cluster=devnet), [tx](https://explorer.solana.com/tx/5m6hKiGbLcK54YMftm62kR38gbtE2JS9h6rArSybvqjYiKMcwo39JggP41VwXbAxfLi4D8FKAApRyi3oTTtiKhMe?cluster=devnet)).
+- An agency asks for one unit past its 50%: refused with `ExceedsIndividualCap` ([tx](https://explorer.solana.com/tx/3LchMMKbMqMyyN5AvJ6yzP6QwvuVpwqU9WFaSnvFeBjER6eoZWfTcbeAgjbUBPRoX1wsESU7SxGTW1GhP6zctZCA?cluster=devnet)).
+
+**Where it matters.** Inside a single manager's system the count can be kept; the federal tool, Santa Catarina and Alagoas try to. Marjan is for the gap between managers: interstate consortia whose records several states consume, such as the [Consórcio Brasil Central](http://brasilcentral.gov.br/compra-compartilhada/), and adhesions across states and municipalities. In 2025, 338 of the 643 São Paulo municipalities that answered the state audit court's survey had adhered to other entities' records ([TCE-SP](https://www.tce.sp.gov.br/6524-artigo-consorcios-intermunicipais-e-registro-precos-risco-portfolio-atas)).
+
+**Second layer: from lawful contract to financeable claim.** The same verified state backs government payment obligations. Marjan records each obligation's eligible balance and guarantees, within the protocol, that it is never financed twice. Financiers would pay for that verification; we have not validated this with any buyer yet.
 
 Built for the Colosseum **Crypto World's Fair** hackathon (Solana track).
 
@@ -139,6 +150,7 @@ cd client && npm install && node devnet-demo.mjs
 
 ## Known limitations
 
+- Eligibility under art. 86, §3 is not yet enforced in the Baseline profile: a state agency can adhere to a municipal record, which §3, II does not allow. The caps in §§4–5 are enforced.
 - Identity: agencies are registered by a labeled **demo issuer**. Production would use credentials from an accountable authority (e.g. Solana Attestation Service issued by an audit court or state government) and multisig wallets per agency.
 - Exceptions: the registry attests which agency is the Ministry of Health; the legal judgment that a purchase is an emergency or executes a federal programme stays human (evidence hash recorded).
 - Participating agencies (other than the manager) and quantity reallocation (*remanejamento*, Decree art. 30) are not modeled yet.
