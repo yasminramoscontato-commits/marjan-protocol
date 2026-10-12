@@ -1,0 +1,512 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Marjan Verifier</title>
+<meta name="description" content="Read-only view of Marjan's adhesion balances and on-chain refusals, read directly from Solana devnet.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #F8F9FB;
+    --surface: #FFFFFF;
+    --text: #2B2F36;
+    --muted: #5F6672;
+    --line: #E3E6EB;
+    --wine: #5A1735;
+    --wine-soft: #F3E9EE;
+    --copper: #B87333;
+    --ok: #2F6B45;
+    --err: #9B2C2C;
+    --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font: 15px/1.5 Inter, system-ui, -apple-system, "Segoe UI", sans-serif;
+  }
+  a { color: var(--wine); }
+  .wrap { max-width: 960px; margin: 0 auto; padding: 0 16px; }
+  header { border-bottom: 1px solid var(--line); background: var(--surface); }
+  header .wrap { padding-top: 20px; padding-bottom: 20px; }
+  .brand { font-weight: 700; font-size: 18px; color: var(--wine); letter-spacing: -0.01em; }
+  .brand span { color: var(--muted); font-weight: 500; }
+  h1 { font-size: 26px; line-height: 1.25; margin: 10px 0 8px; letter-spacing: -0.02em; }
+  .badge {
+    display: inline-block; font-size: 12px; font-weight: 600; padding: 3px 10px;
+    border-radius: 999px; background: var(--wine-soft); color: var(--wine);
+  }
+  .meta { color: var(--muted); font-size: 13px; margin-top: 8px; }
+  h2 { font-size: 19px; margin: 32px 0 6px; letter-spacing: -0.01em; }
+  .lead { color: var(--muted); margin: 0 0 14px; font-size: 14px; }
+  .card {
+    background: var(--surface); border: 1px solid var(--line); border-radius: 10px;
+    padding: 16px; margin: 14px 0;
+  }
+  .card h3 { font-size: 15px; margin: 0 0 4px; }
+  .facts { display: flex; flex-wrap: wrap; gap: 4px 18px; font-size: 13px; color: var(--muted); }
+  .facts b { color: var(--text); font-weight: 600; }
+  .item { border-top: 1px solid var(--line); margin-top: 14px; padding-top: 14px; }
+  .nums { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin: 10px 0; }
+  .num { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; }
+  .num .k { font-size: 12px; color: var(--muted); }
+  .num .v { font-size: 18px; font-weight: 600; font-variant-numeric: tabular-nums; }
+  .bar { position: relative; height: 14px; background: #EEF0F3; border-radius: 4px; margin: 26px 0 30px; }
+  .bar .fill { position: absolute; left: 0; top: 0; bottom: 0; background: var(--wine); border-radius: 4px 0 0 4px; }
+  .bar .mark { position: absolute; top: -6px; bottom: -6px; width: 2px; background: var(--copper); }
+  .bar .mark.dashed { background: repeating-linear-gradient(var(--copper) 0 3px, transparent 3px 6px); }
+  .bar .tag { position: absolute; font-size: 11px; color: var(--copper); white-space: nowrap; font-weight: 600; }
+  .bar .tag.top { top: -22px; }
+  .bar .tag.bottom { bottom: -22px; }
+  table { width: 100%; border-collapse: collapse; font-size: 13px; margin: 6px 0; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); vertical-align: top; }
+  th { font-weight: 600; color: var(--muted); font-size: 12px; }
+  td.n { font-variant-numeric: tabular-nums; text-align: right; }
+  th.n { text-align: right; }
+  .scroll { overflow-x: auto; }
+  code, .addr { font-family: var(--mono); font-size: 12px; }
+  .src { font-size: 11px; color: var(--muted); }
+  .src a { color: var(--muted); }
+  .err { color: var(--err); font-size: 13px; }
+  .okc { color: var(--ok); }
+  .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
+  .pill.err { border-color: #E9C9C9; background: #FBF1F1; }
+  .refusal { border-left: 3px solid var(--wine); }
+  .rule { font-weight: 600; color: var(--wine); }
+  details summary { cursor: pointer; font-size: 13px; color: var(--muted); margin-top: 6px; }
+  footer { border-top: 1px solid var(--line); margin-top: 40px; padding: 20px 0 40px; font-size: 13px; color: var(--muted); }
+  footer p { margin: 4px 0; }
+  .loading { color: var(--muted); font-size: 13px; }
+  @media (max-width: 560px) {
+    h1 { font-size: 21px; }
+    .hide-sm { display: none; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="wrap">
+    <div class="brand">Marjan <span>· Compliance infrastructure</span></div>
+    <h1>The cap is in the law. The count is on-chain.</h1>
+    <span class="badge">Solana devnet · demo identities</span>
+    <div class="meta" id="readmeta">Reading from devnet…</div>
+  </div>
+</header>
+
+<main class="wrap">
+  <h2>Adhesion balances</h2>
+  <p class="lead">Every price record and item the program holds, decoded from its account. Bars show the quantity committed to non-participating agencies (pending + authorized) against the tender's maximum and the statutory 2× cap (Law 14.133/2021, art. 86, §5). Each number links to the account it was read from.</p>
+  <div id="atas"><p class="loading">Loading accounts…</p></div>
+
+  <h2>Refused on-chain</h2>
+  <p class="lead">Requests the program refused during the recorded runs (<code>client/devnet-run.json</code>, <code>client/concurrency-run.json</code>). Each one is re-read from devnet to confirm the transaction failed with the recorded error.</p>
+  <div id="refusals"><p class="loading">Loading recorded runs…</p></div>
+</main>
+
+<footer>
+  <div class="wrap">
+    <p>Program: <a class="addr" id="prog" target="_blank" rel="noopener"></a></p>
+    <p>Source: <a href="https://github.com/yasminramoscontato-commits/marjan-protocol" target="_blank" rel="noopener">github.com/yasminramoscontato-commits/marjan-protocol</a></p>
+    <p>Demo identities; no real government data. Read-only: this page never signs or sends a transaction.</p>
+  </div>
+</footer>
+
+<script>
+"use strict";
+const RPC = "https://api.devnet.solana.com";
+const PROGRAM_ID = "5cmBDMRdqAfrhmkMmLVxTBCNBHxh5sneyvWXJViyjz9E";
+const IDL_URL = "../client/idl/marjan.json";
+const RUN_URLS = ["../client/devnet-run.json", "../client/concurrency-run.json"];
+const EXPLORER = "https://explorer.solana.com";
+
+// <decoder>
+const B58 = "123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz";
+function b58encode(bytes) {
+  let zeros = 0;
+  while (zeros < bytes.length && bytes[zeros] === 0) zeros++;
+  const digits = [];
+  for (let i = zeros; i < bytes.length; i++) {
+    let carry = bytes[i];
+    for (let j = 0; j < digits.length; j++) {
+      carry += digits[j] << 8;
+      digits[j] = carry % 58;
+      carry = (carry / 58) | 0;
+    }
+    while (carry) { digits.push(carry % 58); carry = (carry / 58) | 0; }
+  }
+  let out = "1".repeat(zeros);
+  for (let i = digits.length - 1; i >= 0; i--) out += B58[digits[i]];
+  return out;
+}
+function b64decode(s) {
+  const bin = atob(s);
+  const out = new Uint8Array(bin.length);
+  for (let i = 0; i < bin.length; i++) out[i] = bin.charCodeAt(i);
+  return out;
+}
+
+// Borsh decoder driven by the Anchor IDL (spec 0.1.0). Covers the types the
+// Marjan accounts use; anything else throws so a wrong decode is never shown.
+class Reader {
+  constructor(bytes, offset) { this.b = bytes; this.o = offset; this.dv = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength); }
+  need(n) { if (this.o + n > this.b.length) throw new Error("account data shorter than the IDL layout"); }
+  u8() { this.need(1); return this.b[this.o++]; }
+  u16() { this.need(2); const v = this.dv.getUint16(this.o, true); this.o += 2; return v; }
+  u32() { this.need(4); const v = this.dv.getUint32(this.o, true); this.o += 4; return v; }
+  u64() { this.need(8); const v = this.dv.getBigUint64(this.o, true); this.o += 8; return v; }
+  i64() { this.need(8); const v = this.dv.getBigInt64(this.o, true); this.o += 8; return v; }
+  bytes(n) { this.need(n); const v = this.b.slice(this.o, this.o + n); this.o += n; return v; }
+}
+function makeDecoder(idl) {
+  const types = new Map(idl.types.map(t => [t.name, t.type]));
+  function decode(type, r) {
+    if (typeof type === "string") {
+      switch (type) {
+        case "u8": return r.u8();
+        case "u16": return r.u16();
+        case "u32": return r.u32();
+        case "u64": return r.u64();
+        case "i64": return r.i64();
+        case "bool": { const v = r.u8(); if (v > 1) throw new Error("invalid bool"); return v === 1; }
+        case "pubkey": return b58encode(r.bytes(32));
+        case "string": return new TextDecoder().decode(r.bytes(r.u32()));
+        default: throw new Error("unsupported IDL type " + type);
+      }
+    }
+    if (type.array) {
+      const [inner, len] = type.array;
+      if (inner === "u8") return r.bytes(len);
+      return Array.from({ length: len }, () => decode(inner, r));
+    }
+    if (type.option) return r.u8() ? decode(type.option, r) : null;
+    if (type.vec) return Array.from({ length: r.u32() }, () => decode(type.vec, r));
+    if (type.defined) {
+      const def = types.get(type.defined.name);
+      if (!def) throw new Error("unknown type " + type.defined.name);
+      if (def.kind === "struct") {
+        const out = {};
+        for (const f of def.fields) out[f.name] = decode(f.type, r);
+        return out;
+      }
+      if (def.kind === "enum") {
+        const tag = r.u8();
+        const v = def.variants[tag];
+        if (!v) throw new Error("invalid enum tag for " + type.defined.name);
+        if (v.fields) throw new Error("enum variants with fields are not supported");
+        return v.name;
+      }
+    }
+    throw new Error("unsupported IDL type " + JSON.stringify(type));
+  }
+  const accounts = new Map(idl.accounts.map(a => [a.name, a.discriminator]));
+  return {
+    discriminator(name) { return Uint8Array.from(accounts.get(name)); },
+    decodeAccount(name, data) {
+      const disc = accounts.get(name);
+      for (let i = 0; i < 8; i++) if (data[i] !== disc[i]) throw new Error("discriminator does not match " + name);
+      return decode({ defined: { name } }, new Reader(data, 8));
+    },
+  };
+}
+// </decoder>
+
+// ---------------------------------------------------------------- data access
+async function rpc(method, params) {
+  const res = await fetch(RPC, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+  });
+  if (!res.ok) throw new Error(`RPC ${method}: HTTP ${res.status}`);
+  const body = await res.json();
+  if (body.error) throw new Error(`RPC ${method}: ${body.error.message}`);
+  return body.result;
+}
+async function getJSON(url) {
+  const res = await fetch(url, { cache: "no-store" });
+  if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
+  return res.json();
+}
+
+// All accounts of one type, decoded. Accounts whose data does not fit the
+// current IDL (written by an earlier program version) are reported, not hidden.
+async function loadType(dec, name) {
+  const result = await rpc("getProgramAccounts", [PROGRAM_ID, {
+    encoding: "base64",
+    withContext: true,
+    filters: [{ memcmp: { offset: 0, bytes: b58encode(dec.discriminator(name)) } }],
+  }]);
+  return { slot: result.context.slot, ...decodeAll(dec, name, result.value.map(a => [a.pubkey, a.account])) };
+}
+function decodeAll(dec, name, pairs) {
+  const ok = [], failed = [];
+  for (const [address, account] of pairs) {
+    if (!account) { failed.push({ address, cause: "account not found" }); continue; }
+    try {
+      ok.push({ address, data: dec.decodeAccount(name, b64decode(account.data[0])) });
+    } catch (e) {
+      failed.push({ address, cause: e.message });
+    }
+  }
+  return { ok, failed };
+}
+async function loadMany(dec, name, addresses) {
+  const pairs = [];
+  let slot = null;
+  for (let i = 0; i < addresses.length; i += 100) {
+    const chunk = addresses.slice(i, i + 100);
+    const result = await rpc("getMultipleAccounts", [chunk, { encoding: "base64" }]);
+    slot = result.context.slot;
+    result.value.forEach((acc, j) => pairs.push([chunk[j], acc]));
+  }
+  return { slot, ...decodeAll(dec, name, pairs) };
+}
+
+// ---------------------------------------------------------------- rendering
+const esc = s => String(s).replace(/[&<>"']/g, c => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+const short = a => a.length > 12 ? `${a.slice(0, 4)}…${a.slice(-4)}` : a;
+const acctUrl = a => `${EXPLORER}/address/${a}?cluster=devnet`;
+const txUrl = s => `${EXPLORER}/tx/${s}?cluster=devnet`;
+const acct = (a, label) => `<a class="addr" href="${acctUrl(a)}" target="_blank" rel="noopener" title="${esc(a)}">${esc(label || short(a))}</a>`;
+const src = a => `<div class="src">from ${acct(a)}</div>`;
+const fmtQty = v => BigInt(v).toLocaleString("en-US");
+function fmtBRL(cents) {
+  const c = BigInt(cents);
+  const reais = (c / 100n).toLocaleString("pt-BR");
+  return `R$ ${reais},${String(c % 100n).padStart(2, "0")}`;
+}
+const fmtDate = secs => new Date(Number(secs) * 1000).toISOString().slice(0, 10);
+const couldNotLoad = (what, e) => `<p class="err">Could not load ${esc(what)}: ${esc(e.message || e)}</p>`;
+
+function bar(item) {
+  const reg = item.data.registered_qty, max = item.data.max_adhesion_qty, used = item.data.committed_capped;
+  const legal = reg * 2n;
+  let scale = legal;
+  if (max > scale) scale = max;
+  if (used > scale) scale = used;
+  if (scale === 0n) scale = 1n;
+  const pct = v => Number((v * 10000n) / scale) / 100;
+  const marks = [];
+  if (max === legal) {
+    marks.push(`<div class="mark" style="left:calc(${pct(legal)}% - 1px)"></div><div class="tag top" style="right:${100 - pct(legal)}%">2× cap = tender max · ${fmtQty(legal)}</div>`);
+  } else {
+    marks.push(`<div class="mark dashed" style="left:calc(${pct(legal)}% - 1px)"></div><div class="tag bottom" style="right:${100 - pct(legal)}%">2× legal cap · ${fmtQty(legal)}</div>`);
+    marks.push(`<div class="mark" style="left:calc(${pct(max)}% - 1px)"></div><div class="tag top" style="${pct(max) > 50 ? `right:${100 - pct(max)}%` : `left:${pct(max)}%`}">tender max · ${fmtQty(max)}</div>`);
+  }
+  return `<div class="bar" role="img" aria-label="${fmtQty(used)} of ${fmtQty(max)} committed"><div class="fill" style="width:${pct(used)}%"></div>${marks.join("")}</div>`;
+}
+
+function renderItem(item, usages, requests, agencies) {
+  const d = item.data;
+  const individual = d.registered_qty / 2n;
+  const remaining = d.max_adhesion_qty > d.committed_capped ? d.max_adhesion_qty - d.committed_capped : 0n;
+  const name = a => (agencies.get(a) ? agencies.get(a).data.name : null);
+  const usageRows = usages.map(u => `<tr>
+      <td>${esc(name(u.data.agency) || "")}<div>${acct(u.data.agency)}</div></td>
+      <td class="n">${fmtQty(u.data.committed)}${src(u.address)}</td>
+      <td class="n hide-sm">${fmtQty(individual)}</td>
+    </tr>`).join("");
+  const reqRows = requests.map(q => `<tr>
+      <td>${acct(q.address)}</td>
+      <td>${esc(name(q.data.adherent_agency) || short(q.data.adherent_agency))}</td>
+      <td class="n">${fmtQty(q.data.requested_qty)}</td>
+      <td class="n">${fmtQty(q.data.authorized_qty)}</td>
+      <td>${esc(q.data.status)}${q.data.exception !== "None" ? ` · ${esc(q.data.exception)}` : ""}</td>
+    </tr>`).join("");
+  return `<div class="item">
+    <h3>Item ${d.item_no} ${acct(item.address)}</h3>
+    <div class="nums">
+      <div class="num"><div class="k">Committed (capped)</div><div class="v">${fmtQty(d.committed_capped)}</div>${src(item.address)}</div>
+      <div class="num"><div class="k">Remaining for adhesions</div><div class="v">${fmtQty(remaining)}</div><div class="src">tender max − committed</div></div>
+      <div class="num"><div class="k">Registered</div><div class="v">${fmtQty(d.registered_qty)}</div>${src(item.address)}</div>
+      <div class="num"><div class="k">Individual cap (50%, §4)</div><div class="v">${fmtQty(individual)}</div><div class="src">registered ÷ 2, rounded down</div></div>
+      <div class="num"><div class="k">Tender max for adhesions</div><div class="v">${fmtQty(d.max_adhesion_qty)}</div>${src(item.address)}</div>
+      <div class="num"><div class="k">Authorized total</div><div class="v">${fmtQty(d.authorized_total)}</div>${src(item.address)}</div>
+      <div class="num"><div class="k">Exempt (art. 32)</div><div class="v">${fmtQty(d.committed_exempt)}</div>${src(item.address)}</div>
+      <div class="num"><div class="k">Unit price</div><div class="v">${fmtBRL(d.unit_price)}</div>${src(item.address)}</div>
+    </div>
+    ${bar(item)}
+    <div class="scroll"><table>
+      <thead><tr><th>Agency</th><th class="n">Committed</th><th class="n hide-sm">Individual cap</th></tr></thead>
+      <tbody>${usageRows || `<tr><td colspan="3" class="src">No adhesion usage accounts for this item.</td></tr>`}</tbody>
+    </table></div>
+    ${requests.length ? `<details><summary>${requests.length} adhesion request${requests.length > 1 ? "s" : ""}</summary><div class="scroll"><table>
+      <thead><tr><th>Request</th><th>Agency</th><th class="n">Requested</th><th class="n">Authorized</th><th>Status</th></tr></thead>
+      <tbody>${reqRows}</tbody></table></div></details>` : ""}
+  </div>`;
+}
+
+function renderAtas(atas, items, usages, requests, agencies, failures) {
+  const byAta = new Map();
+  for (const it of items) {
+    if (!byAta.has(it.data.ata)) byAta.set(it.data.ata, []);
+    byAta.get(it.data.ata).push(it);
+  }
+  const sorted = [...atas].sort((a, b) => Number(b.data.valid_from - a.data.valid_from));
+  const html = sorted.map(ata => {
+    const d = ata.data;
+    const its = (byAta.get(ata.address) || []).sort((a, b) => a.data.item_no - b.data.item_no);
+    const manager = agencies.get(d.manager_agency);
+    return `<section class="card">
+      <h3>Price record ${acct(ata.address)}</h3>
+      <div class="facts">
+        <span>Status <b>${esc(d.status)}</b></span>
+        <span>Valid <b>${fmtDate(d.valid_from)}</b> → <b>${fmtDate(d.valid_until)}</b> (UTC)</span>
+        <span>Manager <b>${esc(manager ? manager.data.name : "")}</b> ${acct(d.manager_agency)} · ${esc(d.manager_sphere)}</span>
+      </div>
+      ${src(ata.address)}
+      ${its.map(it => renderItem(it,
+        usages.filter(u => u.data.item === it.address).sort((a, b) => (b.data.committed > a.data.committed ? 1 : -1)),
+        requests.filter(q => q.data.item === it.address),
+        agencies)).join("") || `<p class="src">No items decoded for this record.</p>`}
+    </section>`;
+  }).join("");
+  const orphanItems = items.filter(it => !atas.some(a => a.address === it.data.ata));
+  const failedHtml = failures.length ? `<details><summary>${failures.length} account(s) could not be decoded</summary><div class="scroll"><table>
+      <thead><tr><th>Type</th><th>Account</th><th>Cause</th></tr></thead>
+      <tbody>${failures.map(f => `<tr><td>${esc(f.type)}</td><td>${acct(f.address)}</td><td class="err">${esc(f.cause)}</td></tr>`).join("")}</tbody>
+    </table></div></details>` : "";
+  return (html || `<p class="src">No price records found.</p>`) +
+    (orphanItems.length ? `<p class="src">${orphanItems.length} item(s) belong to a record that could not be read.</p>` : "") + failedHtml;
+}
+
+// ---------------------------------------------------------------- refusals
+function collectRefusals(runs) {
+  const out = [];
+  for (const { url, run } of runs) {
+    for (const s of run.steps || []) {
+      if (s.outcome !== "ok") out.push({ file: url, label: s.label, basis: s.basis, code: s.outcome, signature: s.signature, slot: s.slot });
+    }
+    for (const race of run.races || []) {
+      for (const r of race.results || []) {
+        if (r.outcome !== "ok") out.push({ file: url, label: race.label, basis: null, code: r.outcome, signature: r.signature, slot: r.slot });
+      }
+    }
+  }
+  return out;
+}
+// Rule cited for each program error, taken from the program's own error message in the IDL.
+function ruleFor(code, idl) {
+  const e = idl.errors.find(x => x.name === code);
+  return e ? e.msg : null;
+}
+function onchainError(meta, idl) {
+  if (!meta) return { text: "not found on devnet", match: null };
+  if (!meta.err) return { text: "succeeded on-chain", match: false };
+  const ie = meta.err.InstructionError;
+  if (ie && ie[1] && typeof ie[1] === "object" && "Custom" in ie[1]) {
+    const e = idl.errors.find(x => x.code === ie[1].Custom);
+    return { text: e ? `${e.name} (custom ${e.code})` : `custom ${ie[1].Custom}`, name: e ? e.name : null };
+  }
+  return { text: JSON.stringify(meta.err), name: null };
+}
+async function verifyRefusal(r, idl) {
+  const cell = document.getElementById("v-" + r.signature);
+  try {
+    const tx = await rpc("getTransaction", [r.signature, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+    if (!tx) { cell.innerHTML = `<span class="err">Could not load: transaction not returned by the RPC</span>`; return; }
+    const oc = onchainError(tx.meta, idl);
+    if (oc.name === r.code) cell.innerHTML = `<span class="okc">Confirmed on devnet</span>: failed with ${esc(oc.text)} · slot ${tx.slot}`;
+    else if (tx.meta && tx.meta.err) cell.innerHTML = `On devnet: failed with ${esc(oc.text)} · slot ${tx.slot}`;
+    else cell.innerHTML = `<span class="err">On devnet the transaction ${esc(oc.text)}</span>`;
+  } catch (e) {
+    cell.innerHTML = `<span class="err">Could not load: ${esc(e.message)}</span>`;
+  }
+}
+function renderRefusals(list, idl) {
+  return list.map(r => {
+    const rule = ruleFor(r.code, idl);
+    return `<div class="card refusal">
+      <div class="rule">${esc(rule || "Not a program rule: the competing transaction had already created the account")}</div>
+      <div style="margin:4px 0"><span class="pill err">${esc(r.code)}</span> ${esc(r.label)}</div>
+      ${r.basis ? `<div class="src">Basis recorded in the run: ${esc(r.basis)}</div>` : ""}
+      <div class="src">Recorded in <code>${esc(r.file.replace("../", ""))}</code> · <a href="${txUrl(r.signature)}" target="_blank" rel="noopener">tx ${esc(short(r.signature))}</a></div>
+      <div class="src" id="v-${esc(r.signature)}">Checking on devnet…</div>
+    </div>`;
+  }).join("");
+}
+
+// ---------------------------------------------------------------- main
+async function main() {
+  const prog = document.getElementById("prog");
+  prog.textContent = PROGRAM_ID;
+  prog.href = acctUrl(PROGRAM_ID);
+
+  let idl;
+  try { idl = await getJSON(IDL_URL); }
+  catch (e) {
+    document.getElementById("atas").innerHTML = couldNotLoad("the IDL", e);
+    document.getElementById("refusals").innerHTML = couldNotLoad("the IDL", e);
+    document.getElementById("readmeta").textContent = "Could not load the IDL.";
+    return;
+  }
+  const dec = makeDecoder(idl);
+
+  // Refusals: from the recorded runs, each re-checked on devnet.
+  const runs = [];
+  const runErrors = [];
+  for (const url of RUN_URLS) {
+    try { runs.push({ url, run: await getJSON(url) }); } catch (e) { runErrors.push(couldNotLoad(url.replace("../", ""), e)); }
+  }
+  const refusals = collectRefusals(runs);
+  document.getElementById("refusals").innerHTML = runErrors.join("") + (renderRefusals(refusals, idl) || `<p class="src">No refusals in the recorded runs.</p>`);
+  // Checked independently of the balances, so a failure there does not leave these pending.
+  (async () => { for (const r of refusals) await verifyRefusal(r, idl); })();
+
+  // Balances.
+  const atasEl = document.getElementById("atas");
+  let atas, items, usages, requests, mode = "getProgramAccounts", slot;
+  try {
+    [atas, items, usages, requests] = await Promise.all(["Ata", "AtaItem", "AgencyItemUsage", "AdhesionRequest"].map(n => loadType(dec, n)));
+    slot = Math.max(atas.slot, items.slot, usages.slot, requests.slot);
+  } catch (e) {
+    // Fallback: the record and item addresses written by the scripted run.
+    const fromRun = runs.find(r => r.run.accounts && r.run.accounts.ata);
+    if (!fromRun) { atasEl.innerHTML = couldNotLoad("program accounts", e); document.getElementById("readmeta").textContent = "Could not read devnet."; return; }
+    try {
+      mode = "getMultipleAccounts (fallback: addresses from client/devnet-run.json)";
+      atas = await loadMany(dec, "Ata", [fromRun.run.accounts.ata]);
+      items = await loadMany(dec, "AtaItem", [fromRun.run.accounts.item]);
+      usages = { ok: [], failed: [] };
+      requests = { ok: [], failed: [] };
+      slot = items.slot;
+      atasEl.insertAdjacentHTML("beforebegin", `<p class="err">getProgramAccounts failed (${esc(e.message)}); showing only the record and item listed in the run file. Per-agency usage needs getProgramAccounts.</p>`);
+    } catch (e2) {
+      atasEl.innerHTML = couldNotLoad("program accounts", e) + couldNotLoad("fallback accounts", e2);
+      document.getElementById("readmeta").textContent = "Could not read devnet.";
+      return;
+    }
+  }
+
+  const agencyAddrs = [...new Set([
+    ...atas.ok.map(a => a.data.manager_agency),
+    ...usages.ok.map(u => u.data.agency),
+    ...requests.ok.map(q => q.data.adherent_agency),
+  ])];
+  let agencies = new Map();
+  const failures = [];
+  for (const [type, set] of [["Ata", atas], ["AtaItem", items], ["AgencyItemUsage", usages], ["AdhesionRequest", requests]]) {
+    for (const f of set.failed) failures.push({ type, ...f });
+  }
+  try {
+    const ag = await loadMany(dec, "Agency", agencyAddrs);
+    agencies = new Map(ag.ok.map(a => [a.address, a]));
+    for (const f of ag.failed) failures.push({ type: "Agency", ...f });
+  } catch (e) {
+    atasEl.insertAdjacentHTML("beforebegin", couldNotLoad("agency names", e));
+  }
+
+  atasEl.innerHTML = renderAtas(atas.ok, items.ok, usages.ok, requests.ok, agencies, failures);
+  document.getElementById("readmeta").textContent =
+    `Read from ${RPC} at slot ${slot.toLocaleString("en-US")} (${new Date().toISOString().replace("T", " ").slice(0, 19)} UTC) via ${mode}.`;
+}
+main().catch(e => {
+  document.getElementById("readmeta").textContent = "Unexpected error: " + e.message;
+});
+</script>
+</body>
+</html>
