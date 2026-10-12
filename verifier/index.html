@@ -81,6 +81,18 @@
   footer { border-top: 1px solid var(--line); margin-top: 40px; padding: 20px 0 40px; font-size: 13px; color: var(--muted); }
   footer p { margin: 4px 0; }
   .loading { color: var(--muted); font-size: 13px; }
+  .why { font-size: 13px; color: var(--muted); margin: 0 0 14px; }
+  .why b { color: var(--text); }
+  .context dl { display: grid; grid-template-columns: max-content 1fr; gap: 6px 14px; margin: 0; font-size: 14px; }
+  .context dt { font-weight: 600; color: var(--wine); }
+  .context dd { margin: 0; }
+  .timeline { list-style: none; margin: 0; padding: 0; font-size: 13px; }
+  .timeline li { display: grid; grid-template-columns: 28px 1fr; gap: 0 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .timeline .n { color: var(--muted); font-variant-numeric: tabular-nums; }
+  .st-accepted { color: var(--ok); font-weight: 600; }
+  .st-rejected { color: var(--wine); font-weight: 600; }
+  .st-failed { color: var(--err); font-weight: 600; }
+  @media (max-width: 560px) { .context dl { grid-template-columns: 1fr; } .context dd { margin-bottom: 6px; } }
   @media (max-width: 560px) {
     h1 { font-size: 21px; }
     .hide-sm { display: none; }
@@ -98,9 +110,21 @@
 </header>
 
 <main class="wrap">
+  <section class="card context" aria-labelledby="ctx">
+    <h3 id="ctx">What you are looking at</h3>
+    <dl>
+      <dt>Devnet records</dt><dd>The program and its transactions on Solana's public test network. Anyone can query them; every number below links to its source.</dd>
+      <dt>Demonstration</dt><dd>The agencies, supplier and financiers are fictional. This is not a government pilot and holds no real government data.</dd>
+      <dt>Not yet</dt><dd>Real institutional identities, eligibility checks under art. 86, §3, and a financing module in operation.</dd>
+    </dl>
+  </section>
   <h2>Adhesion balances</h2>
   <p class="lead">Every price record and item the program holds, decoded from its account. Bars show the quantity committed to non-participating agencies (pending + authorized) against the tender's maximum and the statutory 2× cap (Law 14.133/2021, art. 86, §5). Each number links to the account it was read from.</p>
   <div id="atas"><p class="loading">Loading accounts…</p></div>
+
+  <h2>Concurrent requests</h2>
+  <p class="lead">Requests submitted at the same moment in the recorded concurrency test (<code>client/concurrency-run.json</code>), in slot order. Each status is read from the transaction on devnet. Within one slot the validator still processes them one at a time, in an order this page does not show.</p>
+  <div id="timeline"><p class="loading">Loading recorded run…</p></div>
 
   <h2>Refused on-chain</h2>
   <p class="lead">Requests the program refused during the recorded runs (<code>client/devnet-run.json</code>, <code>client/concurrency-run.json</code>). Each one is re-read from devnet to confirm the transaction failed with the recorded error.</p>
@@ -307,6 +331,14 @@ function bar(item) {
   return `<div class="bar" role="img" aria-label="${fmtQty(used)} of ${fmtQty(max)} committed"><div class="fill" style="width:${pct(used)}%"></div>${marks.join("")}</div>`;
 }
 
+function why(item) {
+  const d = item.data;
+  const legal = d.registered_qty * 2n;
+  const base = `The registered quantity is <b>${fmtQty(d.registered_qty)}</b>. Adhesions by non-participating agencies may not exceed 2× that amount in total (art. 86, §5) or 50% per agency (§4).`;
+  if (d.max_adhesion_qty === legal) return `<p class="why">Why <b>${fmtQty(d.max_adhesion_qty)}</b> units? ${base}</p>`;
+  return `<p class="why">Why <b>${fmtQty(d.max_adhesion_qty)}</b> units? ${base} The tender set its own maximum below the statutory <b>${fmtQty(legal)}</b>.</p>`;
+}
+
 function renderItem(item, usages, requests, agencies) {
   const d = item.data;
   const individual = d.registered_qty / 2n;
@@ -337,6 +369,7 @@ function renderItem(item, usages, requests, agencies) {
       <div class="num"><div class="k">Unit price</div><div class="v">${fmtBRL(d.unit_price)}</div>${src(item.address)}</div>
     </div>
     ${bar(item)}
+    ${why(item)}
     <div class="scroll"><table>
       <thead><tr><th>Agency</th><th class="n">Committed</th><th class="n hide-sm">Individual cap</th></tr></thead>
       <tbody>${usageRows || `<tr><td colspan="3" class="src">No adhesion usage accounts for this item.</td></tr>`}</tbody>
@@ -418,6 +451,35 @@ function onchainError(meta, idl) {
   }
   return { text: JSON.stringify(meta.err), name: null };
 }
+function renderTimeline(runs) {
+  const conc = runs.find(r => r.run.kind === "concurrency");
+  const race = conc && (conc.run.races || [])[0];
+  if (!race) return { html: `<p class="err">Could not load: no concurrency race in client/concurrency-run.json</p>`, entries: [] };
+  const entries = race.results.map((r, i) => ({ ...r, i })).sort((a, b) => a.slot - b.slot || a.i - b.i);
+  const html = `<div class="card"><h3>${esc(race.label)}</h3>
+    <div class="src">${race.submitted} submitted · ${race.succeeded} succeeded (recorded) · slots ${race.slots.map(x => x.toLocaleString("en-US")).join(", ")}</div>
+    <ol class="timeline">${entries.map((e, k) => `<li><span class="n">${k + 1}</span><div>
+      <span id="t-${esc(e.signature)}" class="loading">Checking on devnet…</span>
+      <div class="src">slot ${e.slot.toLocaleString("en-US")} · <a href="${txUrl(e.signature)}" target="_blank" rel="noopener">tx ${esc(short(e.signature))}</a> · recorded: ${esc(e.outcome)}</div>
+    </div></li>`).join("")}</ol></div>`;
+  return { html, entries };
+}
+async function verifyTimelineEntry(e, idl) {
+  const cell = document.getElementById("t-" + e.signature);
+  try {
+    const tx = await rpc("getTransaction", [e.signature, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+    if (!tx) { cell.className = "err"; cell.textContent = "Could not load: transaction not returned by the RPC"; return; }
+    if (!tx.meta.err) { cell.className = "st-accepted"; cell.textContent = "Accepted"; return; }
+    const oc = onchainError(tx.meta, idl);
+    const byRule = oc.name && idl.errors.some(x => x.name === oc.name);
+    cell.className = byRule ? "st-rejected" : "st-failed";
+    cell.textContent = byRule ? `Rejected by rule: ${oc.name}` : `Failed (other reason): ${oc.text}`;
+  } catch (err) {
+    cell.className = "err";
+    cell.textContent = "Could not load: " + err.message;
+  }
+}
+
 async function verifyRefusal(r, idl) {
   const cell = document.getElementById("v-" + r.signature);
   try {
@@ -455,6 +517,7 @@ async function main() {
   catch (e) {
     document.getElementById("atas").innerHTML = couldNotLoad("the IDL", e);
     document.getElementById("refusals").innerHTML = couldNotLoad("the IDL", e);
+    document.getElementById("timeline").innerHTML = couldNotLoad("the IDL", e);
     document.getElementById("readmeta").textContent = "Could not load the IDL.";
     return;
   }
@@ -468,8 +531,13 @@ async function main() {
   }
   const refusals = collectRefusals(runs);
   document.getElementById("refusals").innerHTML = runErrors.join("") + (renderRefusals(refusals, idl) || `<p class="src">No refusals in the recorded runs.</p>`);
+  const timeline = renderTimeline(runs);
+  document.getElementById("timeline").innerHTML = timeline.html;
   // Checked independently of the balances, so a failure there does not leave these pending.
-  (async () => { for (const r of refusals) await verifyRefusal(r, idl); })();
+  (async () => {
+    for (const e of timeline.entries) await verifyTimelineEntry(e, idl);
+    for (const r of refusals) await verifyRefusal(r, idl);
+  })();
 
   // Balances.
   const atasEl = document.getElementById("atas");
