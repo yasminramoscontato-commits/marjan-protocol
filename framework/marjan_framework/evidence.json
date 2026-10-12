@@ -169,7 +169,7 @@
    "level": "national",
    "status": "court",
    "date": "2026-03-11",
-   "claim": "Price-registration procedures from Jan 2023 to Jun 2025 totalled about R$ 970.9bn in 301.5k procurements run on 179 different systems (federal systems: R$ 337.8bn); in 2025 they were R$ 470bn (42.38% of R$ 1.1tn). The federal adhesion module allowed requests and authorizations above the 2x cap (balances of -2, -155, -25), rounded the 50% cap up, allowed authorization after expiry, and could not produce reliable remaining balances.",
+   "claim": "Price-registration procedures from Jan 2023 to Jun 2025 totalled about R$ 970.9bn in 301.5k procurements run on 179 different systems (federal systems: R$ 337.8bn); in 2025 they were R$ 470bn (42.38% of R$ 1.1tn). The federal adhesion module (Gestão de Atas, Contratos.gov.br) allowed requests and authorizations above the 2x cap (balances of -2, -155, -25), rounded the 50% cap up, allowed authorization after expiry, and could not produce reliable remaining balances.",
    "source": "TCU Acórdão 547/2026-Plenário, TC 016.359/2025-9 (report paras. 66-68, 81; items 9.1.1.6-9.1.1.11, 9.1.3.2)",
    "url": "https://portal.tcu.gov.br/uploads/noticias/pdf/2026/03/11/016.359-2025-9_.pdf"
   },
