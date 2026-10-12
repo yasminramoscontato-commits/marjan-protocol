@@ -72,6 +72,7 @@
   .src { font-size: 11px; color: var(--muted); }
   .src a { color: var(--muted); }
   .err { color: var(--err); font-size: 13px; }
+  .pending { color: var(--copper); }
   .okc { color: var(--ok); }
   .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
   .pill.err { border-color: #E9C9C9; background: #FBF1F1; }
@@ -239,17 +240,41 @@ function makeDecoder(idl) {
 // </decoder>
 
 // ---------------------------------------------------------------- data access
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+class RateLimited extends Error {}
+// The public devnet RPC rate-limits bursts (HTTP 429). Retry with backoff,
+// honoring Retry-After, before reporting the read as not done.
 async function rpc(method, params) {
-  const res = await fetch(RPC, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
-  });
-  if (!res.ok) throw new Error(`RPC ${method}: HTTP ${res.status}`);
-  const body = await res.json();
-  if (body.error) throw new Error(`RPC ${method}: ${body.error.message}`);
-  return body.result;
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetch(RPC, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
+    });
+    if (res.status === 429) {
+      if (attempt >= 5) throw new RateLimited(`the public RPC rate-limited ${method} (HTTP 429)`);
+      const after = Number(res.headers.get("retry-after"));
+      await sleep(after > 0 ? after * 1000 : 1000 * 2 ** attempt);
+      continue;
+    }
+    if (!res.ok) throw new Error(`RPC ${method}: HTTP ${res.status}`);
+    const body = await res.json();
+    if (body.error) throw new Error(`RPC ${method}: ${body.error.message}`);
+    return body.result;
+  }
 }
+const txCache = new Map();
+function getTx(signature) {
+  if (!txCache.has(signature)) {
+    const p = rpc("getTransaction", [signature, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+    p.catch(() => txCache.delete(signature));
+    txCache.set(signature, p);
+  }
+  return txCache.get(signature);
+}
+const notVerified = e => e instanceof RateLimited
+  ? `<span class="pending">Not verified in this load: ${esc(e.message)}. The recorded outcome is shown; reload the page to check again.</span>`
+  : `<span class="err">Could not load: ${esc(e.message)}</span>`;
 async function getJSON(url) {
   const res = await fetch(url, { cache: "no-store" });
   if (!res.ok) throw new Error(`${url}: HTTP ${res.status}`);
@@ -334,7 +359,7 @@ function bar(item) {
 function why(item) {
   const d = item.data;
   const legal = d.registered_qty * 2n;
-  const base = `The registered quantity is <b>${fmtQty(d.registered_qty)}</b>. Adhesions by non-participating agencies may not exceed 2× that amount in total (art. 86, §5) or 50% per agency (§4).`;
+  const base = `The registered quantity is <b>${fmtQty(d.registered_qty)}</b>. Adhesions by non-participating agencies may not exceed 2× that amount in total (art. 86, §5) or 50% per non-participating agency (§4).`;
   if (d.max_adhesion_qty === legal) return `<p class="why">Why <b>${fmtQty(d.max_adhesion_qty)}</b> units? ${base}</p>`;
   return `<p class="why">Why <b>${fmtQty(d.max_adhesion_qty)}</b> units? ${base} The tender set its own maximum below the statutory <b>${fmtQty(legal)}</b>.</p>`;
 }
@@ -362,7 +387,7 @@ function renderItem(item, usages, requests, agencies) {
       <div class="num"><div class="k">Committed (capped)</div><div class="v">${fmtQty(d.committed_capped)}</div>${src(item.address)}</div>
       <div class="num"><div class="k">Remaining for adhesions</div><div class="v">${fmtQty(remaining)}</div><div class="src">tender max − committed</div></div>
       <div class="num"><div class="k">Registered</div><div class="v">${fmtQty(d.registered_qty)}</div>${src(item.address)}</div>
-      <div class="num"><div class="k">Individual cap (50%, §4)</div><div class="v">${fmtQty(individual)}</div><div class="src">registered ÷ 2, rounded down</div></div>
+      <div class="num"><div class="k">Per-agency cap for non-participants (50%, §4)</div><div class="v">${fmtQty(individual)}</div><div class="src">registered ÷ 2, rounded down</div></div>
       <div class="num"><div class="k">Tender max for adhesions</div><div class="v">${fmtQty(d.max_adhesion_qty)}</div>${src(item.address)}</div>
       <div class="num"><div class="k">Authorized total</div><div class="v">${fmtQty(d.authorized_total)}</div>${src(item.address)}</div>
       <div class="num"><div class="k">Exempt (art. 32)</div><div class="v">${fmtQty(d.committed_exempt)}</div>${src(item.address)}</div>
@@ -371,7 +396,7 @@ function renderItem(item, usages, requests, agencies) {
     ${bar(item)}
     ${why(item)}
     <div class="scroll"><table>
-      <thead><tr><th>Agency</th><th class="n">Committed</th><th class="n hide-sm">Individual cap</th></tr></thead>
+      <thead><tr><th>Non-participating agency</th><th class="n">Committed</th><th class="n hide-sm">50% cap (§4)</th></tr></thead>
       <tbody>${usageRows || `<tr><td colspan="3" class="src">No adhesion usage accounts for this item.</td></tr>`}</tbody>
     </table></div>
     ${requests.length ? `<details><summary>${requests.length} adhesion request${requests.length > 1 ? "s" : ""}</summary><div class="scroll"><table>
@@ -464,33 +489,45 @@ function renderTimeline(runs) {
     </div></li>`).join("")}</ol></div>`;
   return { html, entries };
 }
+// Plain-language reading of each outcome; the technical name stays next to it.
+const PLAIN = {
+  ExceedsGlobalCap: "the request would exceed the aggregate limit for adhesions (2× the registered quantity)",
+  ExceedsIndividualCap: "the agency would exceed its 50% limit as a non-participating agency",
+  FederalAdhesionForbidden: "a federal agency may not adhere to a state, district or municipal record",
+  MunicipalAdhesionForbidden: "this state agency's regulation does not allow adhering to this municipal record",
+  ExceedsAdhesionValue: "the obligations would exceed the value the adhesion authorized",
+  ExceedsFinanceableBalance: "the financing would exceed what is left to finance",
+  AccountAlreadyInUse: "a competing transaction had already used this financing slot",
+};
 async function verifyTimelineEntry(e, idl) {
   const cell = document.getElementById("t-" + e.signature);
   try {
-    const tx = await rpc("getTransaction", [e.signature, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+    const tx = await getTx(e.signature);
     if (!tx) { cell.className = "err"; cell.textContent = "Could not load: transaction not returned by the RPC"; return; }
-    if (!tx.meta.err) { cell.className = "st-accepted"; cell.textContent = "Accepted"; return; }
+    if (!tx.meta.err) { cell.className = "st-accepted"; cell.textContent = "Accepted — the request fit within both limits"; return; }
     const oc = onchainError(tx.meta, idl);
     const byRule = oc.name && idl.errors.some(x => x.name === oc.name);
     cell.className = byRule ? "st-rejected" : "st-failed";
-    cell.textContent = byRule ? `Rejected by rule: ${oc.name}` : `Failed (other reason): ${oc.text}`;
+    cell.innerHTML = byRule
+      ? `Rejected — ${esc(PLAIN[oc.name] || "a program rule refused it")} <span class="pill err">${esc(oc.name)}</span>`
+      : `Failed (other reason): ${esc(oc.text)}`;
   } catch (err) {
-    cell.className = "err";
-    cell.textContent = "Could not load: " + err.message;
+    cell.className = "";
+    cell.innerHTML = notVerified(err);
   }
 }
 
 async function verifyRefusal(r, idl) {
   const cell = document.getElementById("v-" + r.signature);
   try {
-    const tx = await rpc("getTransaction", [r.signature, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+    const tx = await getTx(r.signature);
     if (!tx) { cell.innerHTML = `<span class="err">Could not load: transaction not returned by the RPC</span>`; return; }
     const oc = onchainError(tx.meta, idl);
     if (oc.name === r.code) cell.innerHTML = `<span class="okc">Confirmed on devnet</span>: failed with ${esc(oc.text)} · slot ${tx.slot}`;
     else if (tx.meta && tx.meta.err) cell.innerHTML = `On devnet: failed with ${esc(oc.text)} · slot ${tx.slot}`;
     else cell.innerHTML = `<span class="err">On devnet the transaction ${esc(oc.text)}</span>`;
   } catch (e) {
-    cell.innerHTML = `<span class="err">Could not load: ${esc(e.message)}</span>`;
+    cell.innerHTML = notVerified(e);
   }
 }
 function renderRefusals(list, idl) {
@@ -499,6 +536,7 @@ function renderRefusals(list, idl) {
     return `<div class="card refusal">
       <div class="rule">${esc(rule || (r.code === "AccountAlreadyInUse" ? "Concurrency: the competing transaction created the financing record first, so this one could not" : "Not a Marjan program error"))}</div>
       <div style="margin:4px 0"><span class="pill err">${esc(r.code)}</span> ${esc(r.label)}</div>
+      ${PLAIN[r.code] ? `<div class="src">In plain words: ${esc(PLAIN[r.code])}.</div>` : ""}
       ${r.basis ? `<div class="src">Basis recorded in the run: ${esc(r.basis)}</div>` : ""}
       <div class="src">Recorded in <code>${esc(r.file.replace("../", ""))}</code> · <a href="${txUrl(r.signature)}" target="_blank" rel="noopener">tx ${esc(short(r.signature))}</a></div>
       <div class="src" id="v-${esc(r.signature)}">Checking on devnet…</div>
@@ -535,8 +573,9 @@ async function main() {
   document.getElementById("timeline").innerHTML = timeline.html;
   // Checked independently of the balances, so a failure there does not leave these pending.
   (async () => {
-    for (const e of timeline.entries) await verifyTimelineEntry(e, idl);
-    for (const r of refusals) await verifyRefusal(r, idl);
+    // One request at a time, spaced out, to stay under the public RPC's limits.
+    for (const e of timeline.entries) { await verifyTimelineEntry(e, idl); await sleep(250); }
+    for (const r of refusals) { await verifyRefusal(r, idl); await sleep(250); }
   })();
 
   // Balances.
