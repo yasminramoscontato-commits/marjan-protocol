@@ -242,14 +242,21 @@ async function loadType(dec, name) {
   }]);
   return { slot: result.context.slot, ...decodeAll(dec, name, result.value.map(a => [a.pubkey, a.account])) };
 }
+// Account sizes of layouts written by earlier program versions (from the git history).
+const EARLIER_LAYOUTS = {
+  AdhesionRequest: { size: 291, note: "matches the layout before the 2026-10-09 audit upgrade (commit 38d8baa), which added unit_price, obligated_amount and rent_payer" },
+};
 function decodeAll(dec, name, pairs) {
   const ok = [], failed = [];
   for (const [address, account] of pairs) {
     if (!account) { failed.push({ address, cause: "account not found" }); continue; }
+    const data = b64decode(account.data[0]);
     try {
-      ok.push({ address, data: dec.decodeAccount(name, b64decode(account.data[0])) });
+      ok.push({ address, data: dec.decodeAccount(name, data) });
     } catch (e) {
-      failed.push({ address, cause: e.message });
+      const earlier = EARLIER_LAYOUTS[name];
+      const note = earlier && data.length === earlier.size ? `${data.length} bytes, ${earlier.note}` : `${data.length} bytes`;
+      failed.push({ address, cause: `${e.message} (${note})` });
     }
   }
   return { ok, failed };
@@ -366,7 +373,7 @@ function renderAtas(atas, items, usages, requests, agencies, failures) {
     </section>`;
   }).join("");
   const orphanItems = items.filter(it => !atas.some(a => a.address === it.data.ata));
-  const failedHtml = failures.length ? `<details><summary>${failures.length} account(s) could not be decoded</summary><div class="scroll"><table>
+  const failedHtml = failures.length ? `<details><summary>${failures.length} account(s) could not be decoded with the current IDL</summary><p class="src">Accounts written by an earlier version of the program keep their old size on-chain. They are listed here rather than hidden; their sizes are compared with the earlier layouts recorded in the repository.</p><div class="scroll"><table>
       <thead><tr><th>Type</th><th>Account</th><th>Cause</th></tr></thead>
       <tbody>${failures.map(f => `<tr><td>${esc(f.type)}</td><td>${acct(f.address)}</td><td class="err">${esc(f.cause)}</td></tr>`).join("")}</tbody>
     </table></div></details>` : "";
@@ -394,12 +401,19 @@ function ruleFor(code, idl) {
   const e = idl.errors.find(x => x.name === code);
   return e ? e.msg : null;
 }
+// System Program errors (solana-system-interface SystemError), identified from the logs.
+const SYSTEM_PROGRAM = "11111111111111111111111111111111";
+const SYSTEM_ERRORS = ["AccountAlreadyInUse", "ResultWithNegativeLamports", "InvalidProgramId", "InvalidAccountDataLength", "MaxSeedLengthExceeded", "AddressWithSeedMismatch", "NonceNoRecentBlockhashes", "NonceBlockhashNotExpired", "NonceUnexpectedBlockhashValue"];
 function onchainError(meta, idl) {
   if (!meta) return { text: "not found on devnet", match: null };
   if (!meta.err) return { text: "succeeded on-chain", match: false };
   const ie = meta.err.InstructionError;
   if (ie && ie[1] && typeof ie[1] === "object" && "Custom" in ie[1]) {
-    const e = idl.errors.find(x => x.code === ie[1].Custom);
+    const code = ie[1].Custom;
+    const hex = "0x" + code.toString(16);
+    const fromSystem = (meta.logMessages || []).some(l => l.startsWith(`Program ${SYSTEM_PROGRAM} failed: custom program error: ${hex}`));
+    if (fromSystem && SYSTEM_ERRORS[code]) return { text: `${SYSTEM_ERRORS[code]} (System Program, custom ${code})`, name: SYSTEM_ERRORS[code] };
+    const e = idl.errors.find(x => x.code === code);
     return { text: e ? `${e.name} (custom ${e.code})` : `custom ${ie[1].Custom}`, name: e ? e.name : null };
   }
   return { text: JSON.stringify(meta.err), name: null };
@@ -421,7 +435,7 @@ function renderRefusals(list, idl) {
   return list.map(r => {
     const rule = ruleFor(r.code, idl);
     return `<div class="card refusal">
-      <div class="rule">${esc(rule || "Not a program rule: the competing transaction had already created the account")}</div>
+      <div class="rule">${esc(rule || (r.code === "AccountAlreadyInUse" ? "Concurrency: the competing transaction created the financing record first, so this one could not" : "Not a Marjan program error"))}</div>
       <div style="margin:4px 0"><span class="pill err">${esc(r.code)}</span> ${esc(r.label)}</div>
       ${r.basis ? `<div class="src">Basis recorded in the run: ${esc(r.basis)}</div>` : ""}
       <div class="src">Recorded in <code>${esc(r.file.replace("../", ""))}</code> · <a href="${txUrl(r.signature)}" target="_blank" rel="noopener">tx ${esc(short(r.signature))}</a></div>

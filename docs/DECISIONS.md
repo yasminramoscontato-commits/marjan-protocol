@@ -52,6 +52,6 @@
 - [ ] Verifiable build, CI, fuzzing, emergency pause (audit, still open)
 - [ ] Interviews: two receivables funds (FIDCs) and one factoring company on willingness to pay (H5, H8)
 - [x] Concurrency test: local validator (6 requests in one slot) and devnet (6 requests across two consecutive slots); 4 accepted, item at 200; financing race 1 of 2
-- [ ] Public verifier page that reads state directly from the chain
+- [x] Public verifier page that reads state directly from the chain (`verifier/`, GitHub Pages)
 - [ ] Validation interviews with procurement officers and financiers
 - [ ] Optional: financing pool with a test stablecoin
