@@ -72,7 +72,7 @@
   .src { font-size: 11px; color: var(--muted); }
   .src a { color: var(--muted); }
   .err { color: var(--err); font-size: 13px; }
-  .pending { color: var(--copper); }
+  .pending { color: var(--muted); }
   .okc { color: var(--ok); }
   .pill { display: inline-block; font-size: 11px; font-weight: 600; padding: 1px 8px; border-radius: 999px; border: 1px solid var(--line); }
   .pill.err { border-color: #E9C9C9; background: #FBF1F1; }
@@ -242,9 +242,19 @@ function makeDecoder(idl) {
 // ---------------------------------------------------------------- data access
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 class RateLimited extends Error {}
-// The public devnet RPC rate-limits bursts (HTTP 429). Retry with backoff,
-// honoring Retry-After, before reporting the read as not done.
-async function rpc(method, params) {
+const RPC_GAP_MS = 300;
+const RETRY_WAITS_S = [1, 2, 4];
+
+// One request at a time against the public devnet RPC, RPC_GAP_MS apart:
+// balance reads and transaction checks share this queue.
+let rpcTail = Promise.resolve();
+function rpc(method, params) {
+  const run = rpcTail.then(() => rpcOnce(method, params));
+  rpcTail = run.catch(() => {}).then(() => sleep(RPC_GAP_MS));
+  return run;
+}
+// HTTP 429: retry up to 3 times, honoring Retry-After or waiting 1, 2 and 4 s.
+async function rpcOnce(method, params) {
   for (let attempt = 0; ; attempt++) {
     const res = await fetch(RPC, {
       method: "POST",
@@ -252,9 +262,9 @@ async function rpc(method, params) {
       body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }),
     });
     if (res.status === 429) {
-      if (attempt >= 5) throw new RateLimited(`the public RPC rate-limited ${method} (HTTP 429)`);
+      if (attempt >= RETRY_WAITS_S.length) throw new RateLimited(`${method} rate-limited (HTTP 429)`);
       const after = Number(res.headers.get("retry-after"));
-      await sleep(after > 0 ? after * 1000 : 1000 * 2 ** attempt);
+      await sleep((after > 0 ? after : RETRY_WAITS_S[attempt]) * 1000);
       continue;
     }
     if (!res.ok) throw new Error(`RPC ${method}: HTTP ${res.status}`);
@@ -263,17 +273,34 @@ async function rpc(method, params) {
     return body.result;
   }
 }
+
+// Confirmed transactions never change, so each one is read once per signature
+// and kept for the tab's session; storage failures are ignored.
+const TX_STORE = "marjan-verifier:tx:";
 const txCache = new Map();
+function storedTx(signature) {
+  try { const v = sessionStorage.getItem(TX_STORE + signature); return v ? JSON.parse(v) : null; } catch { return null; }
+}
+function storeTx(signature, tx) {
+  try { sessionStorage.setItem(TX_STORE + signature, JSON.stringify(tx)); } catch { /* storage unavailable or full */ }
+}
 function getTx(signature) {
   if (!txCache.has(signature)) {
-    const p = rpc("getTransaction", [signature, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }]);
+    const kept = storedTx(signature);
+    const p = kept ? Promise.resolve(kept) : rpc("getTransaction", [signature, { encoding: "json", maxSupportedTransactionVersion: 0, commitment: "confirmed" }])
+      .then(tx => {
+        if (!tx) return tx;
+        const slim = { slot: tx.slot, meta: { err: tx.meta.err, logMessages: tx.meta.logMessages || [] } };
+        storeTx(signature, slim);
+        return slim;
+      });
     p.catch(() => txCache.delete(signature));
     txCache.set(signature, p);
   }
   return txCache.get(signature);
 }
 const notVerified = e => e instanceof RateLimited
-  ? `<span class="pending">Not verified in this load: ${esc(e.message)}. The recorded outcome is shown; reload the page to check again.</span>`
+  ? `<span class="pending">Recorded in run file · devnet check rate-limited, reload to retry</span>`
   : `<span class="err">Could not load: ${esc(e.message)}</span>`;
 async function getJSON(url) {
   const res = await fetch(url, { cache: "no-store" });
@@ -573,9 +600,8 @@ async function main() {
   document.getElementById("timeline").innerHTML = timeline.html;
   // Checked independently of the balances, so a failure there does not leave these pending.
   (async () => {
-    // One request at a time, spaced out, to stay under the public RPC's limits.
-    for (const e of timeline.entries) { await verifyTimelineEntry(e, idl); await sleep(250); }
-    for (const r of refusals) { await verifyRefusal(r, idl); await sleep(250); }
+    for (const e of timeline.entries) await verifyTimelineEntry(e, idl);
+    for (const r of refusals) await verifyRefusal(r, idl);
   })();
 
   // Balances.
