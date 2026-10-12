@@ -2,7 +2,7 @@
 
 **The cap on piggyback purchases from government price records is written in the law. How much of it is already used is invisible to anyone outside the managing agency's system.**
 
-Brazilian law lets agencies that did not take part in a tender adhere ("carona", piggybacking) to another agency's price-registration record: up to 50% of each item per agency, and twice the registered quantity across all of them (Law 14.133/2021, art. 86, §§4–5). The second limit depends on what every other agency has already taken. That count lives only in the managing agency's own system. An adherent from another city, state or branch cannot check it before buying; audit courts find out afterwards.
+Brazilian law lets agencies that did not take part in a tender adhere ("carona", piggybacking) to another agency's price-registration record: up to 50% of each item per agency, and twice the registered quantity across all of them (Law 14.133/2021, art. 86, §§4–5). The second limit depends on what every other agency has already taken. That count lives only in the managing agency's own system. An adherent from another city, state or branch cannot check it before buying; audit courts find out afterwards. Even the federal adhesion module showed items with negative available balances (−2, −155, −25), rounded the 50% cap up and allowed adhesions to expired records to be authorized when the federal audit court examined it ([TCU, Acórdão 547/2026-Plenário](https://portal.tcu.gov.br/uploads/noticias/pdf/2026/03/11/016.359-2025-9_.pdf), report paras. 66–67; items 9.1.1.6–9.1.1.7).
 
 Marjan keeps that count as shared state on Solana. An item's adhesion balance changes only through a program that refuses, at request time, any request that breaks the statutory caps. The adherent, the supplier, the manager or an audit court can verify it on-chain without trusting our interface.
 
@@ -32,7 +32,7 @@ Built for the Colosseum **Crypto World's Fair** hackathon (Solana track).
 | Devnet deployment | **Live**, audited binary — [`5cmBDMRd…jz9E`](https://explorer.solana.com/address/5cmBDMRdqAfrhmkMmLVxTBCNBHxh5sneyvWXJViyjz9E?cluster=devnet); scripted scenario and parallel-submission concurrency test in [`docs/DEVNET.md`](docs/DEVNET.md); binary built before the rename, under the former name Solutio (same program ID and behavior) |
 | TypeScript client + IDL (`client/`) | Demo script used for the devnet run; cost measurement script |
 | Framework (`framework/`) | Evidence base, rulebook (24 rules across Brazil, Alagoas and the EU), reference engine, 12 scenario replays, unit economics from measured devnet costs; 22 tests |
-| Public verifier page | **Not yet** |
+| Public verifier page | **Live**, read-only: [`verifier/`](verifier/index.html), published at [yasminramoscontato-commits.github.io/marjan-protocol/verifier](https://yasminramoscontato-commits.github.io/marjan-protocol/verifier/). Reads every price record, item, per-agency usage and request straight from devnet, and re-checks each recorded refusal on-chain; no wallet, no writes |
 | Financing pool (test stablecoin) | **Not started** — experimental, optional |
 
 Last full test run: 51 passed, 0 failed (2026-10-09). After the rename to Marjan (2026-10-11) the LiteSVM suites have **not** been rerun yet: the code compiles and the 13 rules tests and 22 framework tests pass. Devnet uses test SOL and DEMO identities with fictional names. No real funds, no real government data, no pilot or partnership is claimed.
